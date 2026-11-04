@@ -101,8 +101,7 @@ button.primary{border-color:var(--accent);color:var(--accent)}
 @media (max-width:560px){#cam{font-size:12px}#map{width:110px;height:110px}#hud .bl{width:150px}}
 @media (prefers-reduced-motion:reduce){#grain{animation:none}#view.low canvas{animation:none}}
 </style>
-</head>
-<body>
+
 <div id="app" class="vhs">
   <div id="view"></div>
   <div id="fx"><div id="vig"></div><div id="scan"></div><div id="grain"></div><div id="dmg"></div><div id="flash"></div><div id="fade"></div></div>
@@ -346,10 +345,11 @@ const LEVELS=[
  wall:['plain','#c6c9bd','#9a9d92'],floor:['carpet','#4c5a52','#33403a'],ceil:['panel','#bfc4bb','#7f857d'],
  fog:['#0c100e',.05],amb:['#44514a',.8],lamp:{c:'#e6f2ee',i:.9,every:3,kind:'panel',flick:.6},
  ent:{t:'stalker',n:2,sp:2.9,delay:20},items:{w:4,b:3},hum:{f:60,k:'hum'},exitc:'#ffffff'},
-{id:'37',name:'Poolrooms',lore:'The tile is still wet. Somewhere a slide is running, and the lights have been on for as long as the water has been warm. The lifeguard chairs all face the pool. Nobody is on duty, and nobody needs to be. Rest here. Drink.',
+{id:'37',name:'Poolrooms',lore:'The tile is still wet. Somewhere a slide is running, and the lights have been on for as long as the water has been warm. The lifeguard chairs all face the pool. Nobody is on duty, and nobody needs to be. Rest here. Drink. One hall is brighter than the rest, and warmer than it should be.',
  gen:'pools',w:42,h:42,cs:4,wh:4.8,gp:{},
  wall:['poolwall','#d6e4e0','#98b3ac'],wall2:['poolwall','#d6e4e0','#98b3ac','mural'],floor:['tile','#cfdedb','#8aa7a1',16],ceil:['panel','#cbd9d5','#86aaa2'],
- skylight:['#5a7aa8','#aab0d2',0x93a3b8],
+ skylight:['#5a7aa8','#aab0d2',0x93a3b8],wall3:['tile','#f3efe2','#c3bba0',16],
+ dream:{fog:'#efe6c6',fogD:.014,amb:['#fff1d2',.85],sun:{c:'#ffdca0',i:.45,p:[-40,26,-24]},exp:.95},
  fog:['#3f6f72',.034],amb:['#7fb0b0',.5],lamp:{c:'#ffdcae',i:.42,every:5,kind:'orb',flick:0},watercol:0x2a9fa0,poolDepth:1.2,exposure:.8,
  ent:null,items:{w:5,b:1},hum:{f:55,k:'pool'},exitc:'#fff7c0',calm:true},
 {id:'5',name:'Electrical Station',lore:'Transformers hum at a pitch you feel in your teeth. Blue light blinks on and off along corridors that look the same in every direction. Do not run. It hears you run.',
@@ -682,27 +682,32 @@ function buildMap(L,seed,spec){
     case'mall':g=genMall(w,h,r);break;
   }
   keepLargest(g.c,w,h);
-  const G={w,h,cs:L.cs,c:g.c,water:g.water||new Uint8Array(w*h),hts:g.hts||null,blocks:g.blocks||[],pools:g.pools||[],pz:g.pz||null,zones:g.zones||[],dry:g.dry||null,sk:g.sk||null,r};
+  const G={w,h,cs:L.cs,c:g.c,water:g.water||new Uint8Array(w*h),hts:g.hts||null,blocks:g.blocks||[],pools:g.pools||[],pz:g.pz||null,zones:g.zones||[],dry:g.dry||null,sk:g.sk||null,dz:g.dz||null,corr:g.corr||null,r};
   if(L.flooded)G.water.fill(1);
   carveRooms(L,G);
   if(L.poolDepth&&G.pools.length)poolField(L,G);
   const open=[];for(let i=0;i<w*h;i++)if(!solid(G.c[i]))open.push(i);
   let sx,sy;
   if(L.gen==='hall'){sx=8;sy=h>>1}
-  else{let pick=0;for(let t=0;t<300;t++){pick=open[(r()*open.length)|0];if(!G.rmask[pick]&&!(L.poolDepth&&G.water[pick]))break}sx=pick%w;sy=(pick/w)|0}
+  else{let pick=0;for(let t=0;t<300;t++){pick=open[(r()*open.length)|0];if(!G.rmask[pick]&&!(L.poolDepth&&G.water[pick])&&!(G.dz&&G.dz[pick]))break}sx=pick%w;sy=(pick/w)|0}
   const d=bfs(G,sx,sy);
   G.start={x:sx,y:sy};G.dist=d;
-  G.exits=placeExits(G,L,r,spec,d,open.filter(i=>!G.rmask[i]&&!(L.poolDepth&&G.water[i])));
+  G.exits=placeExits(G,L,r,spec,d,open.filter(i=>!G.rmask[i]&&!(L.poolDepth&&G.water[i])&&!(G.dz&&G.dz[i])));
   G.lamps=[];
   if(L.lamp)for(const rm of G.rooms)G.lamps.push({x:rm.cx,y:rm.cy,int:true});
   if(L.lamp){const e=L.lamp.every,sh=open.slice().sort(()=>r()-.5);
-    for(const i of sh){const x=i%w,y=(i/w)|0;let ok=true;
+    for(const i of sh){if(G.dz&&G.dz[i])continue;const x=i%w,y=(i/w)|0;let ok=true;
       for(const q of G.lamps){const dx=q.x-x,dy=q.y-y;if(dx*dx+dy*dy<e*e){ok=false;break}}
       if(ok)G.lamps.push({x,y})}}
   if(L.lamp&&G.pools.length)for(const p of G.pools){ // aqua underwater lights
-    const pc=p.type==='spa'?'#7fe9ff':p.type==='kids'?'#8ff5e0':'#4fe3dc',gain=p.type==='lap'||p.type==='dive'?1.7:1.35;
+    const pc=p.type==='spa'?'#7fe9ff':p.type==='kids'?'#8ff5e0':p.dream?'#9ff0d0':'#4fe3dc',gain=p.type==='lap'||p.type==='dive'?1.7:p.dream?.8:1.35;
+    if(p.type==='flood')continue;
     const pts=p.type==='lagoon'?[[p.cx,p.cy],[p.cx-3,p.cy],[p.cx+3,p.cy],[p.cx,p.cy-3],[p.cx,p.cy+3]]:p.type==='lap'?[[p.cx,p.cy],[p.cx+(p.hz?-3:0),p.cy+(p.hz?0:-3)],[p.cx+(p.hz?3:0),p.cy+(p.hz?0:3)]]:[[p.cx,p.cy]];
     for(const[x,y]of pts)G.lamps.push({x,y,pool:true,pc,gain})}
+  if(L.lamp&&G.dz){ // warm hidden lights that make the dream wing glow
+    for(const z of G.zones){
+      if(z.kind==='dreamhall')for(const[dx,dy]of[[-3,-3],[3,-3],[-3,3],[3,3],[0,0]])G.lamps.push({x:z.zx+dx,y:z.zy+dy,hid:true,pc:'#ffe3a8',gain:1.15});
+      else if(z.kind==='dreamflood'&&G.corr){const co=G.corr;for(let a=co.a0+1;a<=co.a1;a+=3)G.lamps.push({x:co.ax==='x'?a:co.mid,y:co.ax==='x'?co.mid:a,hid:true,pc:'#ffe3a8',gain:1.1})}}}
   const cand=open.filter(i=>d[i]>6&&G.exits.every(e=>(Math.abs(i%w-e.x)+Math.abs(((i/w)|0)-e.y))>4)).sort(()=>r()-.5);
   G.items=[];let ci=0;
   for(let i=0;i<(L.items.w||0);i++)if(ci<cand.length){const j=cand[ci++];G.items.push({t:'w',x:j%w,y:(j/w)|0,got:false})}
@@ -758,7 +763,8 @@ step(floor,sprint,water){
     default:this.nz(.07,.14*v,'highpass',1500,1,true);this.nz(.1,.07*v,'lowpass',500,1);
   }
 },
-amb_stop(){for(const n of this.amb){try{n.stop&&n.stop()}catch(e){}try{n.disconnect()}catch(e){}}this.amb=[];this.t={}},
+amb_stop(){for(const n of this.amb){try{n.stop&&n.stop()}catch(e){}try{n.disconnect()}catch(e){}}this.amb=[];this.t={};this.dreamG=null},
+dream(m){if(this.dreamG&&this.ctx)this.dreamG.gain.setTargetAtTime(m*.055,this.ctx.currentTime,.6)},
 ambient(kind,f){
   const c=this.ctx;if(!c)return;this.amb_stop();this.kind=kind;
   const g=c.createGain();g.gain.value=1;g.connect(this.out);this.amb.push(g);
@@ -773,7 +779,8 @@ ambient(kind,f){
     case'hum':add('sawtooth',f,.028,260);add('sine',f*2,.03);add('sine',f*4.01,.008);{const b=add('sine',f*8,.004);lfo(b.gain,.3,.003)}break;
     case'buzz':{const b=add('sawtooth',f,.04,900);lfo(b.gain,7,.025);add('square',f*2.02,.01,1500)}break;
     case'water':noise('bandpass',520,.05,.6);add('sine',f||90,.02);this.t.drip=1.5;break;
-    case'pool':{noise('bandpass',420,.03,.5);const n=noise('lowpass',1100,.028,.4);lfo(n.ng.gain,.11,.018);add('sine',f||55,.03);add('sine',(f||55)*1.5,.012);add('sine',(f||55)*1.189,.008);this.t.drip=1.4;this.t.splash=5;this.t.chime=35}break;
+    case'pool':{noise('bandpass',420,.03,.5);const n=noise('lowpass',1100,.028,.4);lfo(n.ng.gain,.11,.018);add('sine',f||55,.03);add('sine',(f||55)*1.5,.012);add('sine',(f||55)*1.189,.008);this.t.drip=1.4;this.t.splash=5;this.t.chime=35;
+      {const dg=c.createGain();dg.gain.value=0;dg.connect(g);[220,277.2,329.6,440].forEach((fr,i)=>{const o=c.createOscillator(),og=c.createGain();o.type='sine';o.frequency.value=fr;og.gain.value=.5/(1+i*.3);o.connect(og);og.connect(dg);o.start();this.amb.push(o,og);lfo(og.gain,.07+i*.03,.12)});this.dreamG=dg;this.amb.push(dg)}}break;
     case'wind':{const n=noise('bandpass',320,.1,.8);lfo(n.fl.frequency,.11,180)}break;
     case'drip':noise('lowpass',160,.06);this.t.drip=.8;break;
     case'quiet':noise('lowpass',220,.03);break;
@@ -870,7 +877,7 @@ function unloadWorld(){
   W.disp=[];W.items=[];W.lampInst=[];W.portals=[];W.stars=null;W.waterMat=null;W.grp=null;W.sky=null;W.clouds=[];W.objs=[];W.caus=[];W.steam=[];W.floats=[];
 }
 function buildWorld(L,G){
-  unloadWorld();W.L=L;W.G=G;
+  unloadWorld();W.L=L;W.G=G;W.mix=0;
   const grp=W.grp=new THREE.Group();scene.add(grp);
   const{w,h,cs}=G,wh=L.wh,fogC=new THREE.Color(L.fog[0]);
   scene.fog=new THREE.FogExp2(fogC,L.fog[1]);scene.background=fogC.clone();
@@ -891,11 +898,12 @@ function buildWorld(L,G){
   const bg=track(new THREE.BoxGeometry(cs,1,cs));
   const uvk=L.sky&&G.hts?3:(L.wrv||1);
   if(uvk!==1){const uv=bg.attributes.uv;for(let i=0;i<uv.count;i++)uv.setY(i,uv.getY(i)*uvk)}
-  const wallCells=[],wallCells2=[],propCells=[],bordCells=[];
+  const wallCells=[],wallCells2=[],wallCells3=[],propCells=[],bordCells=[];
+  const nearDz=(x,y)=>{if(!G.dz)return false;for(let dy=-1;dy<=1;dy++)for(let dx=-1;dx<=1;dx++){const nx=x+dx,ny=y+dy;if(nx>=0&&ny>=0&&nx<w&&ny<h&&G.dz[ny*w+nx])return true}return false};
   for(let y=0;y<h;y++)for(let x=0;x<w;x++){const v=G.c[y*w+x];
     if(v===1){let edge=false;
       for(const[dx,dy]of[[1,0],[-1,0],[0,1],[0,-1],[1,1],[-1,-1],[1,-1],[-1,1]]){const nx=x+dx,ny=y+dy;if(nx<0||ny<0||nx>=w||ny>=h||G.c[ny*w+nx]!==1){edge=true;break}}
-      if(edge)(L.borderTex&&(x===0||y===0||x===w-1||y===h-1)?bordCells:(L.wall2&&(x*73+y*151)%7===0?wallCells2:wallCells)).push([x,y])}
+      if(edge)(L.borderTex&&(x===0||y===0||x===w-1||y===h-1)?bordCells:(L.wall3&&nearDz(x,y)?wallCells3:L.wall2&&(x*73+y*151)%7===0?wallCells2:wallCells)).push([x,y])}
     else if(v===2)propCells.push([x,y])}
   const wi=new THREE.InstancedMesh(bg,wm,wallCells.length);const col=new THREE.Color();const rr=G.r;
   const pd=L.poolDepth||0,nearW=(x,y)=>pd&&(G.water[y*w+x]||(x>0&&G.water[y*w+x-1])||(x<w-1&&G.water[y*w+x+1])||(y>0&&G.water[(y-1)*w+x])||(y<h-1&&G.water[(y+1)*w+x]));
@@ -903,6 +911,11 @@ function buildWorld(L,G){
     dummy.position.set((x+.5)*cs,(ht-dn)/2,(y+.5)*cs);dummy.scale.set(1,ht+dn,1);dummy.updateMatrix();wi.setMatrixAt(i,dummy.matrix);
     const s=.8+rr()*.28;wi.setColorAt(i,col.setRGB(s,s,s))});
   wi.frustumCulled=false;wi.instanceMatrix.needsUpdate=true;if(wi.instanceColor)wi.instanceColor.needsUpdate=true;grp.add(wi);
+  if(wallCells3.length){ // the dream wing: plain warm-white tile
+    const wt3=track(mkTex(L.wall3[0],L.wall3[1],L.wall3[2],L.wall3[3])),wm3=bumpify(track(new THREE.MeshPhongMaterial({map:wt3,shininess:30,specular:0x333322})),wt3);
+    const w3=new THREE.InstancedMesh(bg,wm3,wallCells3.length);
+    wallCells3.forEach(([x,y],i)=>{dummy.position.set((x+.5)*cs,wh/2,(y+.5)*cs);dummy.scale.set(1,wh,1);dummy.updateMatrix();w3.setMatrixAt(i,dummy.matrix);const s=.92+rr()*.1;w3.setColorAt(i,col.setRGB(s,s,s*.97))});
+    w3.frustumCulled=false;w3.instanceMatrix.needsUpdate=true;if(w3.instanceColor)w3.instanceColor.needsUpdate=true;grp.add(w3)}
   if(wallCells2.length){ // a few wall panels carry a different mosaic (the poolside murals)
     const wt2=track(mkTex(L.wall2[0],L.wall2[1],L.wall2[2],L.wall2[3])),wm2=track(new THREE.MeshPhongMaterial({map:wt2,shininess:3,specular:0x111111}));
     bumpify(wm2,wt2);const w2=new THREE.InstancedMesh(bg,wm2,wallCells2.length);
@@ -930,7 +943,7 @@ function buildWorld(L,G){
   if(L.poolDepth)buildPool(L,G,grp,fm);
   else{const fl=new THREE.Mesh(pg2,fm);fl.rotation.x=-Math.PI/2;fl.position.set(w*cs/2,0,h*cs/2);grp.add(fl)}
   if(L.ceil){const ct=track(mkTex(L.ceil[0],L.ceil[1],L.ceil[2]));ct.repeat.set(w,h);
-    const cm=track(new THREE.MeshPhongMaterial({map:ct,shininess:2}));bumpify(cm,ct);const ce=new THREE.Mesh(pg2,cm);ce.rotation.x=Math.PI/2;ce.position.set(w*cs/2,wh,h*cs/2);grp.add(ce);if(L.skylight&&G.sk)buildSky(L,G,grp)}
+    const cm=track(new THREE.MeshPhongMaterial({map:ct,shininess:2}));bumpify(cm,ct);const ce=new THREE.Mesh(pg2,cm);ce.rotation.x=Math.PI/2;ce.position.set(w*cs/2,wh,h*cs/2);grp.add(ce);if(L.skylight&&G.sk)buildSky(L,G,grp);if(L.dream&&G.dz)buildDream(L,G,grp)}
   else if(!L.day){ // stars
     const n=500,pos=new Float32Array(n*3);for(let i=0;i<n;i++){const a=Math.random()*6.28,e=.15+Math.random()*1.3,r=200;pos[i*3]=Math.cos(a)*Math.cos(e)*r;pos[i*3+1]=Math.sin(e)*r;pos[i*3+2]=Math.sin(a)*Math.cos(e)*r}
     const sg=track(new THREE.BufferGeometry());sg.setAttribute('position',new THREE.BufferAttribute(pos,3));
@@ -949,10 +962,10 @@ function buildWorld(L,G){
     const lm=track(new THREE.MeshBasicMaterial({color:0xffffff,fog:true}));
     const li=W.lampMesh=new THREE.InstancedMesh(lg,lm,G.lamps.length);
     G.lamps.forEach((q,i)=>{
-      const lc=L.lamp.c;q.col=new THREE.Color(q.pool?q.pc:lc==='rainbow'?new THREE.Color().setHSL(Math.random(),.9,.62):Array.isArray(lc)?lc[(Math.random()*lc.length)|0]:lc);
-      q.wx=(q.x+.5)*cs;q.wz=(q.y+.5)*cs;q.wy=q.pool?POOLWL+.12:q.int?wh-.55:L.lamp.y||(k==='panel'||k==='tube'?wh-.04:k==='orb'?wh-.55:k==='lamp'?4.4:.3);
+      const lc=L.lamp.c;q.col=new THREE.Color((q.pool||q.hid)?q.pc:lc==='rainbow'?new THREE.Color().setHSL(Math.random(),.9,.62):Array.isArray(lc)?lc[(Math.random()*lc.length)|0]:lc);
+      q.wx=(q.x+.5)*cs;q.wz=(q.y+.5)*cs;q.wy=q.pool?POOLWL+.12:q.hid?wh-1.1:q.int?wh-.55:L.lamp.y||(k==='panel'||k==='tube'?wh-.04:k==='orb'?wh-.55:k==='lamp'?4.4:.3);
       q.ph=Math.random()*100;q.bad=Math.random()<L.lamp.flick*.5;
-      dummy.position.set(q.wx,q.wy,q.wz);dummy.scale.setScalar(q.pool?.001:1);dummy.rotation.y=k==='tube'&&((q.x*7+q.y*13)&1)?Math.PI/2:0;dummy.updateMatrix();dummy.rotation.y=0;li.setMatrixAt(i,dummy.matrix);li.setColorAt(i,q.col)});dummy.scale.set(1,1,1);
+      dummy.position.set(q.wx,q.wy,q.wz);dummy.scale.setScalar((q.pool||q.hid)?.001:1);dummy.rotation.y=k==='tube'&&((q.x*7+q.y*13)&1)?Math.PI/2:0;dummy.updateMatrix();dummy.rotation.y=0;li.setMatrixAt(i,dummy.matrix);li.setColorAt(i,q.col)});dummy.scale.set(1,1,1);
     li.frustumCulled=false;li.instanceMatrix.needsUpdate=true;li.instanceColor.needsUpdate=true;grp.add(li);
     if(k==='lamp'){const pg3=track(new THREE.BoxGeometry(.14,4.4,.14)),pm3=track(new THREE.MeshBasicMaterial({color:0x151515})),pi3=new THREE.InstancedMesh(pg3,pm3,G.lamps.length);
       G.lamps.forEach((q,i)=>{dummy.position.set(q.wx,q.int?-9:2.2,q.wz);dummy.updateMatrix();pi3.setMatrixAt(i,dummy.matrix)});pi3.frustumCulled=false;grp.add(pi3)}
@@ -1030,7 +1043,7 @@ function buildDeco(L,G,grp){
 }
 function worldAnim(t,dt){
   if(W.sky)W.sky.position.copy(cam.position);
-  objAnim(t,dt);poolAnim(t,dt);
+  objAnim(t,dt);poolAnim(t,dt);dreamAnim(t,dt);
   if(W.sunDir&&sunL.castShadow){const px=cam.position.x,pz=cam.position.z;sunL.target.position.set(px,0,pz);sunL.position.set(px+W.sunDir.x*100,W.sunDir.y*100,pz+W.sunDir.z*100);sunL.target.updateMatrixWorld()}
   for(let i=0;i<W.clouds.length;i++){const m=W.clouds[i];m.position.x+=dt*(.6+i*.35);if(m.position.x>W.G.w*W.G.cs*1.1)m.position.x=-W.G.w*W.G.cs*.1}
   if(W.waterMat&&W.waterMat.map){W.waterMat.map.offset.set((t*.018)%1,(t*.011)%1)}
@@ -1404,6 +1417,7 @@ function placeObjects(L,G){
   const free=(x,z,rad)=>{
     const x0=Math.floor((x-rad)/cs),x1=Math.floor((x+rad)/cs),z0=Math.floor((z-rad)/cs),z1=Math.floor((z+rad)/cs);
     for(let j=z0;j<=z1;j++)for(let i=x0;i<=x1;i++)if(sol(i,j))return false;
+    if(G.dz&&G.dz[Math.floor(z/cs)*w+Math.floor(x/cs)])return false;
     return !wet(x,z);
   };
   const keep=[[(G.start.x+.5)*cs,(G.start.y+.5)*cs,6.5]];
@@ -1635,22 +1649,25 @@ function dressRooms(L,G,grp){
 /* ---------- the Poolrooms: a leisure centre from some other decade, still lit, still running, nobody in it ---------- */
 const POOLWL=-.2;
 function genPools(w,h,r){
-  const c=new Uint8Array(w*h),water=new Uint8Array(w*h),pz=new Uint8Array(w*h),dry=new Uint8Array(w*h),sk=new Uint8Array(w*h),pools=[],zones=[];
+  const c=new Uint8Array(w*h),water=new Uint8Array(w*h),pz=new Uint8Array(w*h),dry=new Uint8Array(w*h),sk=new Uint8Array(w*h),dz=new Uint8Array(w*h),pools=[],zones=[],gaps=[];
   for(let y=0;y<h;y++)for(let x=0;x<w;x++)if(x===0||y===0||x===w-1||y===h-1)c[y*w+x]=1;
   const lines=[14,28];
   for(const Ln of lines){for(let y=1;y<h-1;y++)c[y*w+Ln]=1;for(let x=1;x<w-1;x++)c[Ln*w+x]=1}
   const gap=(x0,y0,x1,y1)=>{for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++)c[y*w+x]=0};
   for(const Ln of lines)for(let seg=0;seg<3;seg++){
     const n=r()<.45?2:1;
-    for(let k=0;k<n;k++){const a=1+seg*14+2+((r()*8)|0);gap(Ln,a,Ln,a+2);gap(a,Ln,a+2,Ln)}
+    for(let k=0;k<n;k++){const a=1+seg*14+2+((r()*8)|0);gap(Ln,a,Ln,a+2);gap(a,Ln,a+2,Ln);gaps.push({vert:true,line:Ln,a,seg},{vert:false,line:Ln,a,seg})}
   }
-  const kinds=['lap','kids','spa','dive','lockers','cafe','deck','lagoon'];
+  // the bright wing: two neighbouring zones on the outer ring, a dream hall and a flooded corridor
+  const ring=[[0,0],[1,0],[2,0],[2,1],[2,2],[1,2],[0,2],[0,1]],i0=(r()*8)|0,hallR=ring[i0],corrR=ring[(i0+1)%8];
+  const kinds=['lap','kids','spa','dive','lockers','cafe'];
   for(let i=kinds.length-1;i>0;i--){const j=(r()*(i+1))|0,t=kinds[i];kinds[i]=kinds[j];kinds[j]=t}
   let ki=0;
   for(let ry=0;ry<3;ry++)for(let rx=0;rx<3;rx++){
     const x0=rx*14+1,y0=ry*14+1,x1=Math.min(w-2,x0+12),y1=Math.min(h-2,y0+12),zx=(x0+x1)>>1,zy=(y0+y1)>>1;
-    const big=rx===1&&ry===1,kind=big?'lagoon':kinds[ki++];
-    zones.push({kind,x0,y0,x1,y1,zx,zy});
+    const big=rx===1&&ry===1,isHall=rx===hallR[0]&&ry===hallR[1],isCorr=rx===corrR[0]&&ry===corrR[1];
+    const kind=big?'lagoon':isHall?'dreamhall':isCorr?'dreamflood':kinds[ki++];
+    zones.push({kind,x0,y0,x1,y1,zx,zy,rx,ry,dream:isHall||isCorr});
     const cells=[],rect=(ax,ay,bx,by)=>{for(let y=ay;y<=by;y++)for(let x=ax;x<=bx;x++)cells.push([x,y])};
     let pool=null;
     if(kind==='lagoon'){
@@ -1660,6 +1677,14 @@ function genPools(w,h,r){
         if(Math.hypot(dx,dy)<=lim&&!(big&&Math.abs(dx)<=1&&Math.abs(dy)<=1))cells.push([x,y]);
       }
       pool={type:'lagoon',b:.3,m:1.2,span:3,tower:big};
+    }else if(kind==='dreamhall'){ // a kidney-shaped pool: two overlapping ellipses on a random heading
+      const th=r()*Math.PI,cs_=Math.cos(th),sn=Math.sin(th);
+      for(let y=y0+2;y<=y1-2;y++)for(let x=x0+2;x<=x1-2;x++){
+        const dx=x-zx,dy=y-zy,u=dx*cs_+dy*sn,v=-dx*sn+dy*cs_;
+        const e1=((u+2.1)/3.7)**2+((v-.7)/2.3)**2<=1,e2=((u-2.2)/3.3)**2+((v+.8)/2.1)**2<=1,br=Math.abs(u)<=1.6&&Math.abs(v)<=1.5;
+        if(e1||e2||br)cells.push([x,y]);
+      }
+      pool={type:'bean',b:.35,m:1.0,span:3,dream:true};
     }else if(kind==='lap'){
       const hz=r()<.5;if(hz)rect(zx-5,zy-2,zx+4,zy+1);else rect(zx-2,zy-5,zx+1,zy+4);
       pool={type:'lap',b:1.2,m:1.2,span:0,hz};
@@ -1673,15 +1698,38 @@ function genPools(w,h,r){
       for(let y=zy-1;y<=zy+2;y++)for(let x=zx-1;x<=zx+2;x++)if(!((x===zx-1||x===zx+2)&&(y===zy-1||y===zy+2)))cells.push([x,y]);
       pool={type:'spa',b:.8,m:.95,span:1};
     }
-    if(pool){
-      pool.id=pools.length+1;pool.zone=zones.length-1;pool.cx=zx;pool.cy=zy;pool.n=cells.length;
+    const reg=(pool,cells,zi)=>{
+      pool.id=pools.length+1;pool.zone=zi;pool.n=cells.length;
       pool.bx0=1e9;pool.by0=1e9;pool.bx1=-1;pool.by1=-1;
       for(const[x,y]of cells){water[y*w+x]=1;pz[y*w+x]=pool.id;pool.bx0=Math.min(pool.bx0,x);pool.bx1=Math.max(pool.bx1,x);pool.by0=Math.min(pool.by0,y);pool.by1=Math.max(pool.by1,y)}
-      pools.push(pool);
-    }
-    for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){if(pool)sk[y*w+x]=1;else dry[y*w+x]=1}
+      pool.cx=(pool.bx0+pool.bx1)>>1;pool.cy=(pool.by0+pool.by1)>>1;pools.push(pool);
+    };
+    if(pool){reg(pool,cells,zones.length-1);pool.cx=zx;pool.cy=zy}
+    for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){if(isHall||isCorr)dz[y*w+x]=1;else if(pool)sk[y*w+x]=1;else dry[y*w+x]=1}
   }
-  return{c,water,pz,pools,zones,dry,sk};
+  // the flooded corridor: fill its zone with wall, then cut one straight channel in from a doorway it shares with the hall
+  let corr=null;
+  {
+    const hz=zones.find(z=>z.kind==='dreamhall'),cz=zones.find(z=>z.kind==='dreamflood');
+    const sameRow=hz.ry===cz.ry;let P,cand,ax,dir;
+    if(sameRow){P=14*Math.max(hz.rx,cz.rx);cand=gaps.filter(g=>g.vert&&g.line===P&&g.seg===cz.ry);ax='x';dir=cz.rx>hz.rx?1:-1}
+    else{P=14*Math.max(hz.ry,cz.ry);cand=gaps.filter(g=>!g.vert&&g.line===P&&g.seg===cz.rx);ax='y';dir=cz.ry>hz.ry?1:-1}
+    if(cand.length){
+      const mid=cand[0].a+1;
+      for(let y=cz.y0;y<=cz.y1;y++)for(let x=cz.x0;x<=cz.x1;x++){c[y*w+x]=1;water[y*w+x]=0;pz[y*w+x]=0}
+      const cells=[],n=ax==='x'?cz.x1-cz.x0:cz.y1-cz.y0,start=ax==='x'?(dir>0?cz.x0:cz.x1):(dir>0?cz.y0:cz.y1);
+      for(let k=0;k<=n;k++){const a=start+dir*k;cells.push(ax==='x'?[a,mid]:[mid,a])}
+      for(const[x,y]of cells)c[y*w+x]=0;
+      const flood={type:'flood',b:.34,m:.34,span:0,dream:true,corridor:true},all=[ax==='x'?[P,mid]:[mid,P]].concat(cells);
+      all.forEach(([x,y])=>{c[y*w+x]=0});
+      {const zi=zones.indexOf(cz);flood.id=pools.length+1;flood.zone=zi;flood.n=all.length;flood.bx0=1e9;flood.by0=1e9;flood.bx1=-1;flood.by1=-1;
+        for(const[x,y]of all){water[y*w+x]=1;pz[y*w+x]=flood.id;flood.bx0=Math.min(flood.bx0,x);flood.bx1=Math.max(flood.bx1,x);flood.by0=Math.min(flood.by0,y);flood.by1=Math.max(flood.by1,y)}
+        flood.cx=(flood.bx0+flood.bx1)>>1;flood.cy=(flood.by0+flood.by1)>>1;pools.push(flood)}
+      const a0=Math.min(start,start+dir*n),a1=Math.max(start,start+dir*n);
+      corr={ax,dir,mid,a0,a1,P};
+    }
+  }
+  return{c,water,pz,pools,zones,dry,sk,dz,corr};
 }
 
 /* floor depth at every cell corner of every pool: shallow at the edge, deeper toward the middle. Shared by the renderer and the camera. */
@@ -1700,7 +1748,7 @@ function poolField(L,G){
   }
   const vd=new Float32Array(N);
   for(let i=0;i<N;i++)if(vp[i]){const p=G.pools[vp[i]-1],d=Math.max(0,dist[i]),t=p.span?Math.min(1,d/p.span):1,s=t*t*(3-2*t);vd[i]=p.b+(p.m-p.b)*s}
-  G.vd=vd;G.vw=vw;
+  G.vd=vd;G.vw=vw;G.vp=vp;
   G.depthAt=(x,z)=>{
     const gx=x/cs,gz=z/cs,ix=Math.floor(gx),iz=Math.floor(gz);
     if(!wat(ix,iz))return 0;
@@ -1727,7 +1775,7 @@ function buildPool(L,G,grp,deckMat){
   // deck
   const dg=track(new THREE.PlaneGeometry(cs,cs));dg.rotateX(-Math.PI/2);
   const dk=mk(dg,deckMat,deck.length);
-  deck.forEach((i,k)=>{dummy.position.set((i%w+.5)*cs,0,((i/w)|0)*cs+cs/2);dummy.rotation.set(0,0,0);dummy.scale.set(1,1,1);dummy.updateMatrix();dk.setMatrixAt(k,dummy.matrix);const s=.94+rr()*.08;dk.setColorAt(k,col.setRGB(s,s,s*1.01))});
+  deck.forEach((i,k)=>{dummy.position.set((i%w+.5)*cs,0,((i/w)|0)*cs+cs/2);dummy.rotation.set(0,0,0);dummy.scale.set(1,1,1);dummy.updateMatrix();dk.setMatrixAt(k,dummy.matrix);const s=.94+rr()*.08;dk.setColorAt(k,G.dz&&G.dz[i]?col.setRGB(s*1.18,s*1.07,s*.93):col.setRGB(s,s,s*1.01))});
   dk.instanceMatrix.needsUpdate=true;if(dk.instanceColor)dk.instanceColor.needsUpdate=true;grp.add(dk);
   if(!basin.length)return;
   // basin floor: one continuous heightfield, so it really does slope
@@ -1735,7 +1783,7 @@ function buildPool(L,G,grp,deckMat){
   const bm=track(new THREE.MeshPhongMaterial({map:bt,vertexColors:true,shininess:70,specular:0x445555}));
   bumpify(bm,bt);const pos=[],uv=[],clr=[],idx=[],vmap=new Map();
   const vtx=(vx,vy)=>{const k=vy*vw+vx;let v=vmap.get(k);
-    if(v===undefined){v=pos.length/3;vmap.set(k,v);const d=vd[k],s=Math.min(1,Math.max(0,(d-.3)/.9));pos.push(vx*cs,-d,vy*cs);uv.push(vx*2,vy*2);clr.push(1-.62*s,1-.32*s,1-.12*s)}return v};
+    if(v===undefined){v=pos.length/3;vmap.set(k,v);const d=vd[k],s=Math.min(1,Math.max(0,(d-.3)/.9));pos.push(vx*cs,-d,vy*cs);uv.push(vx*2,vy*2);const dp=G.pools[G.vp[k]-1];if(dp&&dp.dream)clr.push(1-.5*s,1-.1*s,1-.2*s);else clr.push(1-.62*s,1-.32*s,1-.12*s)}return v};
   for(const i of basin){const x=i%w,y=(i/w)|0,a=vtx(x,y),b=vtx(x+1,y),c2=vtx(x,y+1),d2=vtx(x+1,y+1);idx.push(a,c2,b,b,c2,d2)}
   const fgeo=track(new THREE.BufferGeometry());
   fgeo.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));fgeo.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));
@@ -1756,8 +1804,8 @@ function buildPool(L,G,grp,deckMat){
   const pw=new THREE.Mesh(wgeo,bm);pw.frustumCulled=false;grp.add(pw);
   // coping: a pale lip along the deck edge
   const cg=track(new THREE.BoxGeometry(cs,.07,.34)),cm=track(new THREE.MeshPhongMaterial({color:0xdfeceb,shininess:60,specular:0x445555}));
-  const cp=mk(cg,cm,edges.length);
-  edges.forEach(([x,y,dx,dy],k)=>{dummy.position.set((x+.5)*cs+dx*(cs/2+.15),.035,(y+.5)*cs+dy*(cs/2+.15));dummy.rotation.set(0,dx?Math.PI/2:0,0);dummy.updateMatrix();cp.setMatrixAt(k,dummy.matrix)});
+  const edgesC=edges.filter(e=>G.pools[G.pz[e[1]*w+e[0]]-1].type!=='flood'),cp=mk(cg,cm,edgesC.length);
+  edgesC.forEach(([x,y,dx,dy],k)=>{dummy.position.set((x+.5)*cs+dx*(cs/2+.15),.035,(y+.5)*cs+dy*(cs/2+.15));dummy.rotation.set(0,dx?Math.PI/2:0,0);dummy.updateMatrix();cp.setMatrixAt(k,dummy.matrix)});
   dummy.rotation.set(0,0,0);cp.instanceMatrix.needsUpdate=true;grp.add(cp);
   // depth markers painted on the deck
   const dmk={};
@@ -1765,7 +1813,7 @@ function buildPool(L,G,grp,deckMat){
     g.fillStyle='#2a6f8a';g.font='bold 40px Arial,sans-serif';g.textAlign='center';g.textBaseline='middle';g.fillText(t,64,34);
     const tx=track(new THREE.CanvasTexture(c));return track(new THREE.MeshBasicMaterial({map:tx,transparent:true,opacity:.7,depthWrite:false,polygonOffset:true,polygonOffsetFactor:-1,polygonOffsetUnits:-1}))})());
   const dpg=track(new THREE.PlaneGeometry(1.0,.5));
-  edges.forEach(([x,y,dx,dy],k)=>{const p=G.pools[G.pz[y*w+x]-1];if(p.type==='kids'&&k%3||p.type==='lagoon'&&k%5||p.type==='spa'&&k%3)return;if((x*7+y*3+k)%2)return;
+  edges.forEach(([x,y,dx,dy],k)=>{const p=G.pools[G.pz[y*w+x]-1];if(p.type==='flood'||p.type==='kids'&&k%3||p.type==='lagoon'&&k%5||p.type==='spa'&&k%3)return;if((x*7+y*3+k)%2)return;
     const m=new THREE.Mesh(dpg,dmat(p.type==='spa'?'0.9m':p.type==='kids'?'0.3m':p.type==='lagoon'?'0.3m - 1.2m':'1.2m'));
     m.rotation.x=-Math.PI/2;m.rotation.z=Math.atan2(dx,dy);
     m.position.set((x+.5)*cs+dx*(cs/2+.8),.012,(y+.5)*cs+dy*(cs/2+.8));grp.add(m)});
@@ -1779,10 +1827,13 @@ function buildPool(L,G,grp,deckMat){
   // the water surface: glassy, slightly greener where it is deep
   const wtx=track(mkTex('water','#ffffff','#e4fbf6'));
   const wmat=W.waterMat=track(new THREE.MeshPhongMaterial({map:wtx,color:L.watercol,transparent:true,opacity:.5,shininess:140,specular:0xffffff,depthWrite:false}));
-  const sg=track(new THREE.PlaneGeometry(cs,cs));sg.rotateX(-Math.PI/2);const sf=mk(sg,wmat,basin.length);
-  basin.forEach((i,k)=>{const x=i%w,y=(i/w)|0,d=(vd[y*vw+x]+vd[y*vw+x+1]+vd[(y+1)*vw+x]+vd[(y+1)*vw+x+1])/4,s=Math.min(1,Math.max(0,(d-.3)/.9));
-    dummy.position.set((x+.5)*cs,WL,(y+.5)*cs);dummy.updateMatrix();sf.setMatrixAt(k,dummy.matrix);sf.setColorAt(k,col.setRGB(1-.34*s,1-.12*s,1-.02*s))});
-  sf.instanceMatrix.needsUpdate=true;if(sf.instanceColor)sf.instanceColor.needsUpdate=true;grp.add(sf);
+  const sg=track(new THREE.PlaneGeometry(cs,cs));sg.rotateX(-Math.PI/2);
+  const wmatD=track(new THREE.MeshPhongMaterial({map:wtx,color:0x3fc6a8,transparent:true,opacity:.46,shininess:150,specular:0xffffff,depthWrite:false}));
+  const surf=(list,mat,dream)=>{if(!list.length)return;const sf=mk(sg,mat,list.length);
+    list.forEach((i,k)=>{const x=i%w,y=(i/w)|0,d=(vd[y*vw+x]+vd[y*vw+x+1]+vd[(y+1)*vw+x]+vd[(y+1)*vw+x+1])/4,s=Math.min(1,Math.max(0,(d-.3)/.9));
+      dummy.position.set((x+.5)*cs,WL,(y+.5)*cs);dummy.updateMatrix();sf.setMatrixAt(k,dummy.matrix);sf.setColorAt(k,dream?col.setRGB(1-.3*s,1-.02*s,1-.1*s):col.setRGB(1-.34*s,1-.12*s,1-.02*s))});
+    sf.instanceMatrix.needsUpdate=true;if(sf.instanceColor)sf.instanceColor.needsUpdate=true;grp.add(sf)};
+  surf(basin.filter(i=>!G.pools[G.pz[i]-1].dream),wmat,false);surf(basin.filter(i=>G.pools[G.pz[i]-1].dream),wmatD,true);
   // lane ropes and lane lines in the lap pool
   const fl2=track(new THREE.SphereGeometry(.085,8,6)),flm=track(new THREE.MeshPhongMaterial({color:0xffffff,shininess:50}));
   for(const p of G.pools){
@@ -1806,7 +1857,7 @@ function buildPool(L,G,grp,deckMat){
   // chrome ladders on the deep edges
   const chrome=track(new THREE.MeshPhongMaterial({color:0xdfe6ea,shininess:110,specular:0xffffff})),rg=track(new THREE.CylinderGeometry(.025,.025,1,8));
   const rail=(g,len,x,y,z,rx,rz)=>{const m=new THREE.Mesh(rg,chrome);m.scale.set(1,len,1);m.position.set(x,y,z);if(rx)m.rotation.x=rx;if(rz)m.rotation.z=rz;g.add(m)};
-  const deepE=edges.filter(e=>G.pools[G.pz[e[1]*w+e[0]]-1].b>=.7),pick=deepE.filter(()=>rr()<10/Math.max(10,deepE.length)*1.3).slice(0,10);
+  const deepE=edges.filter(e=>{const p=G.pools[G.pz[e[1]*w+e[0]]-1];return p.b>=.7||p.type==='bean'}),pick=deepE.filter(()=>rr()<10/Math.max(10,deepE.length)*1.3).slice(0,10);
   for(const[x,y,dx,dy]of pick){
     const D=G.pools[G.pz[y*w+x]-1].b,g=new THREE.Group();
     g.position.set((x+.5)*cs+dx*(cs/2-.12)+(dy?(rr()-.5)*cs*.5:0),0,(y+.5)*cs+dy*(cs/2-.12)+(dx?(rr()-.5)*cs*.5:0));g.rotation.y=Math.atan2(dx,dy);
@@ -2075,6 +2126,9 @@ function poolDress(L,G,add,keep){
       for(const s of sp.slice(0,2)){const[x,zz]=at(s,1.1,0);tryAdd('bench',x,zz,face(s)+Math.PI)}
       loungers(sp.slice(2),1);palms(z,2);
       for(const s of sp.slice(4)){if(r()<.25){const[x,zz]=at(s,1.4,0);tryAdd('noodles',x,zz,face(s))}}
+    }else if(p.type==='bean'){
+      const placed=[];let n=0;
+      for(const s of sp){if(n>=5)break;const[x,zz]=at(s,1.7,0);if(placed.some(q=>(q[0]-x)**2+(q[1]-zz)**2<64))continue;if(tryAdd('dreamColumn',x,zz,0)){placed.push([x,zz]);n++}}
     }else if(p.type==='spa'){
       for(const s of sp.slice(0,3)){const[x,zz]=at(s,1.0,0);tryAdd('bench',x,zz,face(s)+Math.PI)}
       loungers(sp.slice(3),2);palms(z,2);
@@ -2087,6 +2141,177 @@ function poolDress(L,G,add,keep){
       for(let t=0;t<80&&n>0;t++){const x=z.x0+2+((r()*(z.x1-z.x0-3))|0),y=z.y0+2+((r()*(z.y1-z.y0-3))|0);if(!deckC(x,y))continue;
         if(tryAdd(r()<.55?'parasolTable':'lounger',cx(x)+(r()-.5)*2,cx(y)+(r()-.5)*2,((r()*4)|0)*Math.PI/2))n--}
     }
+  }
+}
+/* ---------- the bright wing of the Poolrooms: cream tile, a flooded porthole corridor, sunlight patches, and a mood that follows you in ---------- */
+Object.assign(OB,{
+dreamColumn(g){
+  const t=cvT('dcol',176,152,(c,w,h)=>{
+    c.fillStyle='#f1ecda';c.fillRect(0,0,w,h);c.strokeStyle='#bdb59a';c.lineWidth=1.3;
+    for(let x=0;x<=w;x+=8){c.beginPath();c.moveTo(x,0);c.lineTo(x,h);c.stroke()}
+    for(let y=0;y<=h;y+=8){c.beginPath();c.moveTo(0,y);c.lineTo(w,y);c.stroke()}
+    for(let i=0;i<90;i++){c.fillStyle='rgba(255,255,255,'+Math.random()*.2+')';c.fillRect(Math.random()*w,Math.random()*h,2,2)}
+    const gr=c.createLinearGradient(0,h*.8,0,h);gr.addColorStop(0,'rgba(120,150,120,0)');gr.addColorStop(1,'rgba(120,150,120,.28)');c.fillStyle=gr;c.fillRect(0,h*.8,w,h*.2);
+  });
+  const sh=tmat('dcol',t,{shininess:55,specular:0x555544}),base=oMat(0xe6dfc8,{shininess:40}),band=oMat(0xbfe3d8,{shininess:60});
+  cy(g,.9,.9,4.5,sh,0,2.55,0,28);          // the fat round shaft
+  cy(g,1.32,1.32,.3,base,0,.15,0,28);      // plinth
+  cy(g,1.0,1.0,.1,band,0,.35,0,28);        // pale aqua band at the foot
+  cy(g,1.15,.92,.38,base,0,4.61,0,28);     // flared capital
+}
+});
+Object.assign(OM,{dreamColumn:{r:1.4,cols:[[0,0,1.0]]}});
+
+function dHash(x,y,k){let n=(x*374761393+y*668265263+k*2147483647)|0;n=Math.imul(n^(n>>>13),1274126177);return((n^(n>>>16))>>>0)/4294967296}
+function dTex(w,h,draw){const c=document.createElement('canvas');c.width=w;c.height=h;draw(c.getContext('2d'),w,h);return track(new THREE.CanvasTexture(c))}
+
+function buildDream(L,G,grp){
+  const{w,h,cs}=G,wh=L.wh,corr=G.corr,D=L.dream;
+  W.dream=null;
+  const free=(x,y)=>x>=0&&y>=0&&x<w&&y<h&&!solid(G.c[y*w+x]);
+  const dzc=(x,y)=>x>=0&&y>=0&&x<w&&y<h&&G.dz[y*w+x]===1;
+  const inCorr=(x,y)=>!!corr&&(corr.ax==='x'?(y===corr.mid&&x>=corr.a0&&x<=corr.a1):(x===corr.mid&&y>=corr.a0&&y<=corr.a1));
+  const inst=(geo,mat,n)=>{const m=new THREE.InstancedMesh(geo,mat,n);m.frustumCulled=false;return m};
+  const put=(m,k,x,y,z,ry,rz,sx,sy,sz)=>{dummy.position.set(x,y,z);dummy.rotation.set(0,ry||0,rz||0);dummy.scale.set(sx,sy,sz);dummy.updateMatrix();m.setMatrixAt(k,dummy.matrix)};
+  const done=m=>{m.instanceMatrix.needsUpdate=true;grp.add(m);dummy.rotation.set(0,0,0);dummy.scale.set(1,1,1)};
+  const addOnce={blending:THREE.AdditiveBlending,transparent:true,depthWrite:false,fog:false,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2};
+
+  /* 1. cream tile ceiling under the normal one */
+  const cells=[];
+  for(let i=0;i<w*h;i++)if(G.dz[i]&&free(i%w,(i/w)|0))cells.push(i);
+  if(corr)cells.push((corr.ax==='x'?corr.mid:corr.P)*w+(corr.ax==='x'?corr.P:corr.mid));
+  if(cells.length){
+    const ct=track(mkTex(L.wall3[0],L.wall3[1],L.wall3[2],L.wall3[3])),cm=bumpify(track(new THREE.MeshPhongMaterial({map:ct,shininess:40,specular:0x444433})),ct);
+    const cg=track(new THREE.PlaneGeometry(cs,cs));cg.rotateX(Math.PI/2);
+    const ci=inst(cg,cm,cells.length);
+    cells.forEach((i,k)=>put(ci,k,(i%w+.5)*cs,wh-.04,((i/w)|0)*cs+cs/2,0,0,1,1,1));
+    done(ci);
+  }
+
+  /* 2. glowing recessed ceiling panels */
+  const pan=[];
+  if(corr)for(let a=corr.a0+1;a<=corr.a1;a+=3){const u=(a+.5)*cs,v=(corr.mid+.5)*cs;pan.push(corr.ax==='x'?[u,v,2.6,1.3]:[v,u,1.3,2.6])}
+  for(const z of G.zones)if(z.kind==='dreamhall')for(const[dx,dy]of[[-3,-3],[3,-3],[-3,3],[3,3],[0,0]])pan.push([(z.zx+dx+.5)*cs,(z.zy+dy+.5)*cs,2.8,2.8]);
+  if(pan.length){
+    const pg=track(new THREE.PlaneGeometry(1,1));pg.rotateX(Math.PI/2);
+    const fm=track(new THREE.MeshBasicMaterial({color:0xcfc6a8})),lm=track(new THREE.MeshBasicMaterial({color:0xfff3d0,fog:false}));
+    const fi=inst(pg,fm,pan.length),li=inst(pg,lm,pan.length);
+    pan.forEach(([x,z,sx,sz],k)=>{put(fi,k,x,wh-.05,z,0,0,sx+.35,1,sz+.35);put(li,k,x,wh-.06,z,0,0,sx,1,sz)});
+    done(fi);done(li);
+  }
+
+  /* 3. the flooded corridor: oval portholes on one side, their sun patches on the other, a dark doorway at the end */
+  if(corr){
+    const{ax,mid,a0,a1,dir}=corr,wins=[];
+    for(let a=a0;a<=a1;a++)for(const off of[.27,.77])wins.push((a+off)*cs);
+    const wt=dTex(64,128,(g,pw,ph)=>{
+      const gr=g.createLinearGradient(0,0,0,ph);gr.addColorStop(0,'#78c4ff');gr.addColorStop(.55,'#cfeaff');gr.addColorStop(1,'#fff6dc');g.fillStyle=gr;g.fillRect(0,0,pw,ph);
+      g.fillStyle='rgba(255,255,255,.9)';for(const[cx,cy_,r]of[[18,60,14],[34,52,16],[48,66,12],[26,78,13]]){g.beginPath();g.arc(cx,cy_,r,0,6.283);g.fill()}
+    });
+    const cg=track(new THREE.CircleGeometry(1,28)),rg=track(new THREE.RingGeometry(.9,1,28)),pg=track(new THREE.PlaneGeometry(1,1));
+    const winM=track(new THREE.MeshBasicMaterial({map:wt,fog:false})),frM=track(new THREE.MeshBasicMaterial({color:0xdcd5bb}));
+    const disc=dTex(128,128,(g,pw,ph)=>{const gr=g.createRadialGradient(64,64,0,64,64,64);gr.addColorStop(0,'rgba(255,236,190,.95)');gr.addColorStop(.68,'rgba(255,230,175,.85)');gr.addColorStop(1,'rgba(255,225,170,0)');g.fillStyle=gr;g.fillRect(0,0,pw,ph)});
+    const patM=track(new THREE.MeshBasicMaterial(Object.assign({map:disc,color:0xffffff,opacity:.8},addOnce)));
+    const wi=inst(cg,winM,wins.length),fr=inst(rg,frM,wins.length),pt=inst(pg,patM,wins.length);
+    const P=(u,v)=>ax==='x'?[u,v]:[v,u]; // (along, across) -> (x,z)
+    const ryA=ax==='x'?Math.PI:-Math.PI/2,ryB=ax==='x'?0:Math.PI/2; // normals pointing into the corridor from the two sides
+    const vA=(mid+1)*cs-.03,vB=mid*cs+.03,sh=1.5;
+    wins.forEach((u,k)=>{
+      let[x,z]=P(u,vA);put(wi,k,x,2.2,z,ryA,0,.43,.73,1);
+      [x,z]=P(u,vA+.005);put(fr,k,x,2.2,z,ryA,0,.46,.78,1);
+      [x,z]=P(u+sh,vB);put(pt,k,x,1.4,z,ryB,0,1.25,2.0,1);
+    });
+    done(wi);done(fr);done(pt);
+    // the dark doorway at the far end (only when the corridor really dead-ends)
+    const ex=ax==='x'?(dir>0?a1+1:a0-1):mid,ey=ax==='x'?mid:(dir>0?a1+1:a0-1);
+    if(ex>=0&&ey>=0&&ex<w&&ey<h&&solid(G.c[ey*w+ex])){
+      const nx=ax==='x'?-dir:0,nz=ax==='x'?0:-dir,ry=Math.atan2(nx,nz);
+      const fx=ax==='x'?(dir>0?(a1+1)*cs:a0*cs):(mid+.5)*cs,fz=ax==='x'?(mid+.5)*cs:(dir>0?(a1+1)*cs:a0*cs);
+      const fl=-.34,dg=track(new THREE.PlaneGeometry(1,1));
+      const frame=new THREE.Mesh(dg,track(new THREE.MeshPhongMaterial({color:0xe6dfc8,shininess:30})));frame.scale.set(1.95,2.9,1);frame.position.set(fx+nx*.02,fl+1.45,fz+nz*.02);frame.rotation.y=ry;grp.add(frame);
+      const hole=new THREE.Mesh(dg,track(new THREE.MeshBasicMaterial({color:0x000000,fog:false})));hole.scale.set(1.55,2.6,1);hole.position.set(fx+nx*.04,fl+1.3,fz+nz*.04);hole.rotation.y=ry;grp.add(hole);
+    }
+  }
+
+  /* 4. cloud-shaped dapples of warm light on the hall's walls */
+  const cloud=dTex(256,160,(g,pw,ph)=>{
+    for(const[cx,cy_,r]of[[78,88,40],[122,66,48],[174,84,42],[104,112,36],[150,112,34],[50,110,26],[204,106,24]]){
+      const gr=g.createRadialGradient(cx,cy_,0,cx,cy_,r);gr.addColorStop(0,'rgba(255,232,180,.92)');gr.addColorStop(.58,'rgba(255,228,170,.82)');gr.addColorStop(1,'rgba(255,222,160,0)');g.fillStyle=gr;g.beginPath();g.arc(cx,cy_,r,0,6.283);g.fill();
+    }
+  });
+  const dap=[];
+  for(let y=0;y<h;y++)for(let x=0;x<w;x++){
+    if(!solid(G.c[y*w+x]))continue;
+    for(const[dx,dy]of[[1,0],[-1,0],[0,1],[0,-1]]){
+      const nx=x+dx,ny=y+dy;if(!free(nx,ny)||!dzc(nx,ny)||inCorr(nx,ny))continue;
+      const q=dHash(x,y,dx*3+dy+7);if(q<.4)dap.push([x,y,dx,dy,q])}
+  }
+  dap.sort((a,b)=>a[4]-b[4]);dap.length=Math.min(dap.length,40);
+  let dapMat=null;
+  if(dap.length){
+    const pg=track(new THREE.PlaneGeometry(1,1));
+    dapMat=track(new THREE.MeshBasicMaterial(Object.assign({map:cloud,color:0xffffff,opacity:.8},addOnce)));
+    cloud.wrapS=cloud.wrapT=THREE.RepeatWrapping;
+    const di=inst(pg,dapMat,dap.length);
+    dap.forEach(([x,y,dx,dy],k)=>{
+      const j=(dHash(x,y,3)-.5)*1.6,sc=.85+dHash(x,y,4)*.5;
+      const px=(x+.5)*cs+dx*(cs/2+.03)+Math.abs(dy)*j,pz=(y+.5)*cs+dy*(cs/2+.03)+Math.abs(dx)*j;
+      put(di,k,px,1.6+dHash(x,y,5)*1.0,pz,Math.atan2(dx,dy),(dHash(x,y,6)-.5)*.3,3.6*sc,2.4*sc,1);
+    });
+    done(di);
+  }
+
+  /* 5. rectangles of sun on the hall floor (with window bars) */
+  const sunT=dTex(256,256,(g,pw,ph)=>{
+    for(let i=0;i<6;i++){g.fillStyle='rgba(255,232,178,.15)';const m=8+i*5;g.fillRect(m,m,pw-m*2,ph-m*2)}
+    g.globalCompositeOperation='destination-out';g.fillStyle='rgba(0,0,0,.55)';g.fillRect(pw/2-5,0,10,ph);g.fillRect(0,ph/2-5,pw,10);
+  });
+  const hz=G.zones.find(z=>z.kind==='dreamhall');
+  if(hz){
+    const cand=[];
+    for(let y=hz.y0+2;y<=hz.y1-2;y++)for(let x=hz.x0+2;x<=hz.x1-2;x++){
+      let ok=true;for(let dy=-1;dy<=1&&ok;dy++)for(let dx=-1;dx<=1;dx++)if(G.water[(y+dy)*w+x+dx]||!free(x+dx,y+dy)){ok=false;break}
+      if(ok)cand.push([x,y,dHash(x,y,11)]);
+    }
+    cand.sort((a,b)=>a[2]-b[2]);
+    const pick=[];for(const c of cand){if(pick.length>=6)break;if(pick.every(p=>Math.abs(p[0]-c[0])+Math.abs(p[1]-c[1])>=5))pick.push(c)}
+    if(pick.length){
+      const pg=track(new THREE.PlaneGeometry(1,1));pg.rotateX(-Math.PI/2);
+      const sm=track(new THREE.MeshBasicMaterial(Object.assign({map:sunT,color:0xffffff,opacity:.7},addOnce)));
+      const si=inst(pg,sm,pick.length);
+      pick.forEach(([x,y],k)=>put(si,k,(x+.5)*cs,.04,(y+.5)*cs,dHash(x,y,12)<.5?0:Math.PI/2,0,3.6,1,5.4));
+      done(si);
+    }
+  }
+  W.dream={dapMat,dapTex:cloud,aud:-1};
+}
+
+const _dc0=new THREE.Color(),_dc1=new THREE.Color(),_dwh=new THREE.Color(0xffffff);
+/* eases the whole mood (fog, ambient light, sun, exposure, music) towards the bright wing as the player walks into it */
+function dreamAnim(t,dt){
+  const L_=W.L,G_=W.G;
+  if(!L_||!L_.dream||!G_||!G_.dz||!scene.fog)return;
+  const D=L_.dream,cs=G_.cs,w=G_.w,h=G_.h,cx=Math.floor(cam.position.x/cs),cz=Math.floor(cam.position.z/cs);
+  let tg=0;
+  if(cx>=0&&cz>=0&&cx<w&&cz<h){
+    if(G_.dz[cz*w+cx])tg=1;
+    else if((cx>0&&G_.dz[cz*w+cx-1])||(cx<w-1&&G_.dz[cz*w+cx+1])||(cz>0&&G_.dz[(cz-1)*w+cx])||(cz<h-1&&G_.dz[(cz+1)*w+cx]))tg=.5;
+  }
+  W.mix+=(tg-W.mix)*(1-Math.exp(-Math.min(dt,.25)/1.1));
+  const m=W.mix,hm=1-GFX.hemi*.55;
+  _dc0.set(L_.fog[0]);_dc1.set(D.fog);_dc0.lerp(_dc1,m);
+  scene.fog.color.copy(_dc0);if(scene.background&&scene.background.isColor)scene.background.copy(_dc0);
+  scene.fog.density=L_.fog[1]+(D.fogD-L_.fog[1])*m;
+  _dc0.set(L_.amb[0]);_dc1.set(D.amb[0]);_dc0.lerp(_dc1,m);
+  const ai=L_.amb[1]+(D.amb[1]-L_.amb[1])*m;
+  ambL.color.copy(_dc0);ambL.intensity=ai*hm;
+  hemiL.intensity=GFX.hemi*ai;hemiL.color.copy(_dc0).lerp(_dwh,.35);hemiL.groundColor.copy(_dc0).multiplyScalar(.4);
+  sunL.color.set(D.sun.c);sunL.position.set(D.sun.p[0],D.sun.p[1],D.sun.p[2]);sunL.intensity=D.sun.i*m;
+  const d=W.dream;
+  if(d){
+    if(d.dapMat)d.dapMat.opacity=.78+Math.sin(t*.35)*.1;
+    if(d.dapTex)d.dapTex.offset.set(Math.sin(t*.23)*.03,Math.cos(t*.19)*.02);
+    if(A.dream&&Math.abs(m-d.aud)>.02){d.aud=m;A.dream(m)}
   }
 }
 /* ---------- camcorder shader (early-2000s mini-DV handycam) ---------- */
@@ -2203,7 +2428,7 @@ function vhsFrame(dt){
 }
 function renderFrame(){
   if(VHS.on||GFX.msaa){
-    const u=vhsMat.uniforms;u.uOff.value=VHS.on?0:1;u.uQ.value=GFX.vq;u.uTime.value=clock%1000;u.uGlitch.value=Math.min(1.5,VHS.g+VHS.k);u.uRoll.value=VHS.roll*VHS.roll;{const ex=(typeof L!=='undefined'&&L&&L.exposure)||1;u.uExp.value+=(ex-u.uExp.value)*.08}
+    const u=vhsMat.uniforms;u.uOff.value=VHS.on?0:1;u.uQ.value=GFX.vq;u.uTime.value=clock%1000;u.uGlitch.value=Math.min(1.5,VHS.g+VHS.k);u.uRoll.value=VHS.roll*VHS.roll;{const ex=(typeof L!=='undefined'&&L&&(L.exposure?(L.dream?L.exposure+(L.dream.exp-L.exposure)*(W.mix||0):L.exposure):1))||1;u.uExp.value+=(ex-u.uExp.value)*.08}
     renderer.setRenderTarget(vhsRT);renderer.render(scene,cam);
     renderer.setRenderTarget(null);renderer.render(vhsScene,vhsCam);
   }else renderer.render(scene,cam);
@@ -2723,7 +2948,7 @@ $('b-again').addEventListener('click',toMenu);
 /* ---------- boot ---------- */
 buildTitle();
 startLevel('0',{demo:true});P.torch=false;
-window.__bk={cam,SET,GQ,applyGfx,devStart,get GFX(){return GFX},blocked,tickPlay,tickTrans,keys,solidAt,bfs,cellOf,S,P,LEVELS,LV,startLevel,beginRun,die,get G(){return G},get ents(){return ents},get L(){return L},get portals(){return W.portals}};
+window.__bk={cam,SET,GQ,applyGfx,devStart,get GFX(){return GFX},blocked,tickPlay,tickTrans,keys,solidAt,bfs,cellOf,S,P,LEVELS,LV,startLevel,beginRun,die,get G(){return G},get W(){return W},worldAnim,get ents(){return ents},get L(){return L},get portals(){return W.portals}};
 requestAnimationFrame(loop);
 })();
 </script>
